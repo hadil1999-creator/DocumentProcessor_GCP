@@ -18,6 +18,9 @@ import sys
 import utils
 import logging
 import requests
+import time
+import requests
+from google.api_core.exceptions import DeadlineExceeded, ServiceUnavailable
 
 from google.cloud import storage, bigquery
 from google.cloud import automl_v1beta1 as automl
@@ -27,6 +30,33 @@ from google.cloud import automl_v1beta1 as automl
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
+
+# Function to handle the API request with retry logic
+def make_api_request_with_retry(data, header, url, max_retries=5, backoff_factor=1.5):
+    attempt = 0
+    while attempt < max_retries:
+        try:
+            response = requests.post(url, json=data, headers=header)
+            # If the response code is 429, the server is asking to retry
+            if response.status_code == 429:
+                retry_after = int(response.headers.get('Retry-After', 60))  # Default to 60 seconds if not specified
+                logger.warning(f"Rate limited. Retrying after {retry_after} seconds.")
+                time.sleep(retry_after)
+                attempt += 1
+            elif response.status_code == 200:
+                return response.json()  # Return the response data if successful
+            else:
+                logger.error(f"Unexpected response: {response.status_code} {response.text}")
+                break  # Break if we get an unexpected error
+        except (requests.exceptions.RequestException, DeadlineExceeded, ServiceUnavailable) as e:
+            # Handle connection or other API-related errors
+            logger.warning(f"Request failed: {e}. Retrying...")
+            time.sleep(backoff_factor ** attempt)  # Exponential backoff
+            attempt += 1
+
+    logger.error("Max retries reached. Exiting...")
+    return None  # Return None if max retries reached without success
 
 def classify_write(bucket_name,
                    prefix,
@@ -43,9 +73,7 @@ def classify_write(bucket_name,
                    main_project_id,
                    compute_region,
                    model_id,
-                   id_token
-                   ):
-
+                   id_token):
     bucket = storage_client.bucket(bucket_name)
     params = {}
     lines = []
@@ -54,7 +82,7 @@ def classify_write(bucket_name,
         bigquery.SchemaField('file', 'STRING', mode='REQUIRED'),
         bigquery.SchemaField('class', 'STRING', mode='REQUIRED'),
         bigquery.SchemaField('class_confidence', 'STRING', mode='REQUIRED'),
-        ]
+    ]
     table = utils.create_table(bq_client, bq_dataset, bq_table, schema)
     if score_threshold:
         params = {"score_threshold": str(score_threshold)}
@@ -62,20 +90,27 @@ def classify_write(bucket_name,
     for blob in bucket.list_blobs(prefix=str(prefix + "/")):
         if blob.name.endswith(".png"):
             logger.info(os.path.basename(blob.name))       
+            
             #[START] GSP666-API REQUEST
             url_lifetime = 3600  # Seconds in an hour
             serving_url = blob.generate_signed_url(expiration=url_lifetime, version='v4')
             header = {'Authorization': 'Bearer ' + id_token}
             data = {"image_url" : serving_url,
-                "project_id": main_project_id,
-                "compute_region": compute_region,
-                "model_id": model_id,
-                }
+                    "project_id": main_project_id,
+                    "compute_region": compute_region,
+                    "model_id": model_id,
+            }
             url = 'https://gsp666-api-kjyo252taq-uc.a.run.app/image'
-            response = requests.post(url, json=data, headers=header)
-            response_data = response.json()
-            logger.info("response data from API")
-            logger.info(response_data)
+            
+            # Make API request with retry logic
+            response_data = make_api_request_with_retry(data, header, url)
+            if response_data:
+                logger.info("response data from API")
+                logger.info(response_data)
+            else:
+                logger.warning("API request failed after retries.")
+                continue  # Skip this blob and move to the next
+
             #[END] GSP666-API REQUEST
             
             for result in response_data["payload"]:
@@ -84,7 +119,7 @@ def classify_write(bucket_name,
                 logger.info("Predicted class score: {}\n".format(result["classification"]["score"]))
 
                 if result["displayName"] == "datasheets":
-                   pass
+                    pass
                 else:
                     # Copy from the pdf folder to the selected_pdf_folder
                     filename = os.path.basename(blob.name).replace('.png', '.pdf')
