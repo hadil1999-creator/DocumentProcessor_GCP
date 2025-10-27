@@ -3,10 +3,9 @@ name: Test DocumentProcessor_GCP
 on:
   push:
     branches: [ main, master ]
-    paths: [ 'DocumentProcessor_GCP/**' ]
   pull_request:
     branches: [ main, master ]
-    paths: [ 'DocumentProcessor_GCP/**' ]
+
 
 jobs:
   test:
