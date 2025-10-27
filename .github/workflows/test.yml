@@ -68,5 +68,4 @@ jobs:
 
     - name: Validate config.yaml
       run: |
-        cd DocumentProcessor_GCP
         python -c "import yaml; config = yaml.safe_load(open('config.yaml', 'r')); print('Config loaded successfully'); print(f'Project ID: {config[\"pipeline_project\"][\"project_id\"]}')"
