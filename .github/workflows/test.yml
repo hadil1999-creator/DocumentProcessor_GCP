@@ -21,25 +21,21 @@ jobs:
 
     - name: Install dependencies
       run: |
-        cd DocumentProcessor_GCP
         python -m pip install --upgrade pip
         pip install -r requirements.txt
 
     - name: Lint with flake8
       run: |
-        cd DocumentProcessor_GCP
         pip install flake8
         flake8 . --count --select=E9,F63,F7,F82 --show-source --statistics
         flake8 . --count --exit-zero --max-complexity=10 --max-line-length=127 --statistics
 
     - name: Syntax check Python files
       run: |
-        cd DocumentProcessor_GCP
         python -m py_compile *.py
 
     - name: Test imports
       run: |
-        cd DocumentProcessor_GCP
         python -c "import training_utils; import yaml; import automl_image; import automl_ner; import automl_objdetect; import automl_text; import final_view; import pdf2png; print('All imports successful')"
 
     - name: Validate config.yaml
